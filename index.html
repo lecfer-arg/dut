@@ -151,6 +151,7 @@
     <div class="nav-tab active" onclick="switchTab('listado')">📋 Listado</div>
     <div class="nav-tab" onclick="switchTab('contrato')">📄 Contrato</div>
   </nav>
+  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v5</span></div>
 </header>
 
 <!-- ===== SECCIÓN LISTADO ===== -->
@@ -185,8 +186,7 @@
       </div>
       <div class="form-group">
         <label>Nombre *</label>
-        <input type="text" id="inp-nombre" placeholder="ej: María Laura" oninput="detectGender(this.value)">
-        <div id="gender-hint" style="display:none; margin-top:6px; padding:8px 12px; border-radius:8px; font-size:12px; align-items:center; gap:10px; flex-wrap:wrap;"></div>
+        <input type="text" id="inp-nombre" placeholder="ej: María Laura">
       </div>
       <div class="form-group">
         <label>DNI *</label>
@@ -501,7 +501,8 @@ function parseExcel(buffer, filename) {
       if(colFec>=0&&row[colFec]){const fv=row[colFec];let fn=fv instanceof Date?fv:(typeof fv==='number'?new Date((fv-25569)*86400*1000):new Date(String(fv)));if(fn&&!isNaN(fn)){const age=Math.floor((today-fn)/(365.25*24*3600*1000));menor=age<18?1:0;}}
       if(!ap||!dni||dni.length<6) continue;
       if(passengers.find(p=>p.dni===dni)) continue;
-      passengers.push({apellido:ap,nombre:nom,tipo:'DNI',desc:'',dni,sexo:'',menor,nac:'AR',tripulante:0,butaca:1});
+      const sexoAuto = detectGenderFromName(nom);
+      passengers.push({apellido:ap,nombre:nom,tipo:'DNI',desc:'',dni,sexo:sexoAuto,menor,nac:'AR',tripulante:0,butaca:1});
       added++;
     }
     document.getElementById('progressBar').classList.remove('show');
@@ -551,9 +552,18 @@ function renderTable() {
   document.getElementById('cnt-sinasiento').textContent=passengers.filter(p=>!p.butaca).length;
   if(!passengers.length){c.innerHTML='<div class="empty-state">Aún no hay pasajeros.</div>';document.getElementById('downloadBtn').disabled=true;return;}
   document.getElementById('downloadBtn').disabled=false;
-  let html=`<table><thead><tr><th>#</th><th>Apellido</th><th>Nombre</th><th>DNI</th><th>Edad</th><th>Asiento</th><th>Nac.</th><th></th></tr></thead><tbody>`;
+  let html=`<table><thead><tr><th>#</th><th>Apellido</th><th>Nombre</th><th>DNI</th><th>Sexo</th><th>Edad</th><th>Asiento</th><th>Nac.</th><th></th></tr></thead><tbody>`;
   passengers.forEach((p,i)=>{
+    const sexoLabel = p.sexo === 'F' ? '<span class="badge" style="background:#F9EEF9;color:#8B3A8B;">F</span>'
+      : p.sexo === 'M' ? '<span class="badge" style="background:#EEF5FF;color:#1A3C5E;">M</span>'
+      : '<span class="badge" style="background:#FFF3D6;color:#8B6000;">? —</span>';
+    const sexoEdit = `<select style="font-size:11px;padding:2px 4px;border-radius:5px;border:1px solid var(--border);margin-left:4px;" onchange="passengers[${i}].sexo=this.value;renderTable()">
+      <option value="" ${!p.sexo?'selected':''}>—</option>
+      <option value="F" ${p.sexo==='F'?'selected':''}>F</option>
+      <option value="M" ${p.sexo==='M'?'selected':''}>M</option>
+    </select>`;
     html+=`<tr><td style="color:var(--muted);font-size:12px;">${i+1}</td><td><strong>${p.apellido}</strong></td><td>${p.nombre}</td><td style="font-family:monospace;">${p.dni}</td>
+    <td style="white-space:nowrap;">${sexoLabel}${sexoEdit}</td>
     <td>${p.menor?'<span class="badge badge-menor">👶 Menor</span>':'<span class="badge badge-mayor">✅ Mayor</span>'}</td>
     <td>${p.butaca?'💺 Sí':'<span class="badge badge-noasiento">🚫 No</span>'}</td>
     <td>${p.nac}</td><td><button class="btn btn-danger" onclick="removePassenger(${i})">✕</button></td></tr>`;
@@ -691,75 +701,17 @@ const NOMBRES_M = new Set([
   'ciro','saul','axel','dylan','alan','brian','kevin','jonathan','ivan','alexis',
 ]);
 
-let genderDetectTimeout = null;
 
-function detectGender(nombre) {
-  clearTimeout(genderDetectTimeout);
-  const hint = document.getElementById('gender-hint');
-  if(!nombre || nombre.trim().length < 2) { hint.style.display='none'; return; }
-
-  genderDetectTimeout = setTimeout(() => {
-    const primerNombre = nombre.trim().split(/[\s,]+/)[0].toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-
-    let sugerido = null;
-    if(NOMBRES_F.has(primerNombre)) sugerido = 'F';
-    else if(NOMBRES_M.has(primerNombre)) sugerido = 'M';
-
-    if(sugerido) {
-      const label = sugerido === 'F' ? '♀ Femenino' : '♂ Masculino';
-      const color = sugerido === 'F' ? '#8B3A8B' : '#1A3C5E';
-      const bg = sugerido === 'F' ? '#F9EEF9' : '#EEF5FF';
-      hint.style.display = 'flex';
-      hint.style.background = bg;
-      hint.style.border = `1px solid ${color}30`;
-      hint.style.color = color;
-      hint.innerHTML = `<span>🔍 Sugerido: <strong>${label}</strong></span>
-        <button onclick="acceptGender('${sugerido}')" style="padding:3px 10px;border:none;border-radius:6px;background:${color};color:#fff;font-size:11px;font-weight:700;cursor:pointer;">✓ Aceptar</button>
-        <button onclick="acceptGender('${sugerido==='F'?'M':'F'}')" style="padding:3px 10px;border:1.5px solid ${color};border-radius:6px;background:none;color:${color};font-size:11px;font-weight:600;cursor:pointer;">↔ Es ${sugerido==='F'?'♂ Masculino':'♀ Femenino'}</button>
-        <button onclick="document.getElementById('gender-hint').style.display='none'" style="padding:3px 8px;border:none;border-radius:6px;background:#ccc;color:#555;font-size:11px;cursor:pointer;">✕</button>`;
-    } else {
-      // Try API as fallback
-      hint.style.display = 'flex';
-      hint.style.background = '#F5F5F5';
-      hint.style.border = '1px solid #DDD';
-      hint.style.color = '#888';
-      hint.innerHTML = `<span>🔍 No se reconoció el nombre. Seleccioná manualmente el sexo.</span>`;
-      tryGenderAPI(primerNombre);
-    }
-  }, 400);
+// Sync version for bulk import (no UI hints)
+function detectGenderFromName(nombreCompleto) {
+  if(!nombreCompleto) return '';
+  const primer = nombreCompleto.trim().split(/[\s,\/]+/)[0].toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  if(NOMBRES_F.has(primer)) return 'F';
+  if(NOMBRES_M.has(primer)) return 'M';
+  return '';
 }
 
-function acceptGender(g) {
-  document.getElementById('inp-sexo').value = g;
-  const hint = document.getElementById('gender-hint');
-  const label = g === 'F' ? '♀ Femenino' : '♂ Masculino';
-  hint.style.background = '#F0FBF5';
-  hint.style.border = '1px solid #B5E0CB';
-  hint.style.color = '#1E8B5A';
-  hint.innerHTML = `<span>✅ Sexo definido como <strong>${label}</strong></span>`;
-  setTimeout(() => hint.style.display='none', 2000);
-}
-
-function tryGenderAPI(nombre) {
-  fetch(`https://api.genderize.io/?name=${encodeURIComponent(nombre)}&country_id=AR`)
-    .then(r => r.json())
-    .then(data => {
-      if(data.gender && data.probability > 0.7) {
-        const g = data.gender === 'female' ? 'F' : 'M';
-        const label = g === 'F' ? '♀ Femenino' : '♂ Masculino';
-        const color = g === 'F' ? '#8B3A8B' : '#1A3C5E';
-        const bg = g === 'F' ? '#F9EEF9' : '#EEF5FF';
-        const hint = document.getElementById('gender-hint');
-        hint.style.background = bg;
-        hint.style.border = `1px solid ${color}30`;
-        hint.style.color = color;
-        hint.innerHTML = `<span>🔍 Sugerido (API): <strong>${label}</strong> <small style="opacity:.6">${Math.round(data.probability*100)}% confianza</small></span>
-          <button onclick="acceptGender('${g}')" style="padding:3px 10px;border:none;border-radius:6px;background:${color};color:#fff;font-size:11px;font-weight:700;cursor:pointer;">✓ Aceptar</button>
-          <button onclick="acceptGender('${g==='F'?'M':'F'}')" style="padding:3px 10px;border:1.5px solid ${color};border-radius:6px;background:none;color:${color};font-size:11px;font-weight:600;cursor:pointer;">↔ Es ${g==='F'?'♂ Masculino':'♀ Femenino'}</button>`;
-      }
-    }).catch(() => {}); // silent fail
-}
 
 // ========== CONTRATO ==========
 function onClienteChange() {
