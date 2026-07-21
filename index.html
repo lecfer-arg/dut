@@ -185,7 +185,8 @@
       </div>
       <div class="form-group">
         <label>Nombre *</label>
-        <input type="text" id="inp-nombre" placeholder="ej: María Laura">
+        <input type="text" id="inp-nombre" placeholder="ej: María Laura" oninput="detectGender(this.value)">
+        <div id="gender-hint" style="display:none; margin-top:6px; padding:8px 12px; border-radius:8px; font-size:12px; align-items:center; gap:10px; flex-wrap:wrap;"></div>
       </div>
       <div class="form-group">
         <label>DNI *</label>
@@ -577,6 +578,188 @@ function showAlert(id,type,msg) {
 
 // Load XLSX
 const xs=document.createElement('script');xs.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';document.head.appendChild(xs);
+
+// ========== DETECCIÓN DE GÉNERO ==========
+const NOMBRES_F = new Set([
+  'maria','ana','laura','carolina','andrea','patricia','claudia','monica','silvia','gabriela',
+  'alejandra','marcela','natalia','veronica','valeria','daniela','paola','lucia','rosa','elena',
+  'teresa','beatriz','marta','norma','graciela','susana','alicia','cristina','gloria','isabel',
+  'nora','diana','miriam','cecilia','vanesa','florencia','romina','leticia','mariana','viviana',
+  'silvana','jessica','lorena','soledad','estela','olga','rita','ruth','elsa','nilda','dora',
+  'gladys','ines','emma','eva','julia','irma','alba','lilia','luisa','clara','sara','elba',
+  'nidia','zulma','lidia','edith','sonia','mabel','amalia','hilda','blanca','ramona','adela',
+  'mirta','yolanda','carmen','pilar','josefa','dolores','mercedes','concepcion','berta','ernestina',
+  'celeste','valentina','antonella','camila','agustina','micaela','melisa','sofia','noelia','sabrina',
+  'melina','brenda','daiana','ayelen','magali','gisela','cintia','tamara','marina','alejandrina',
+  'mariela','analia','claudina','roxana','viviana','carina','noemi','erika','karina','yamila',
+  'anabella','natalí','flavia','eugenia','virginia','yesica','marisol','griselda','yolanda',
+  'mahira','iara','abril','abril','azul','milagros','belen','ailen','nahir','lujan','fatima',
+  'guadalupe','candela','catalina','julieta','victoria','josefina','martina','lara','zoe','mia',
+  'emma','olivia','renata','bianca','brisa','delfina','pilar','malena','jazmin','jimena','rocio',
+  'sheila','aldana','anahi','caro','pia','vicky','nati','sole','flor','agathe','paula','carla',
+  'gisel','gaby','sandy','wendy','tammy','nadia','marisa','lidia','alba','ida','alma','vera',
+  'iris','lola','luna','tania','thalia','paola','ariana','ivana','eliana','leila','vilma',
+  'nadia','nahiara','juanita','rosario','encarnacion','presentacion','conception','esperanza',
+  'amparo','dolores','asuncion','nieves','purificacion','macarena','trinidad','inmaculada',
+  'alejandrina','bernardita','florencia','consolacion','remedios','perpetua','serafina',
+  'yuliana','yanina','yanela','araceli','anabela','yesenia','selena','sabina','serena',
+  'simona','stefania','stephania','tamara','tatiana','valeria','vanina','veronica','victoria',
+  'yolanda','zaneta','zulma','zunilda','zurilda','zenia','wanda','walda','una','ulises',
+  'celina','clementina','corina','dalila','deolinda','diana','eladia','eleonora','elisa',
+  'elisabet','elisenda','elvira','emilia','emiliana','enriqueta','esmeralda','estela',
+  'estefania','eugenia','eulalia','evangelina','fabiana','felicia','felisa','fermina',
+  'fernanda','filomena','fiorella','fortunata','francisca','gemma','georgina','geraldine',
+  'gertrudis','gilda','gimena','giovanna','giselle','guadalupe','guillermina','herminia',
+  'hermosa','higinia','hortensia','ignacia','iliana','imelda','irene','isolda','italia',
+  'jacinta','jimena','jocelyn','johana','jorgelina','josefina','juana','julieta','justina',
+  'karen','katia','laila','leandra','leonor','leonora','lidia','liliana','lina','lorena',
+  'lourdes','ludmila','luisa','luz','magdalena','malvina','manuela','marcela','marcelina',
+  'margarita','marianela','maribel','maricela','maricruz','mariluz','marilu','marilyn',
+  'marisela','maristela','marita','marlene','marta','matilde','maxima','melania','micaela',
+  'milagros','milena','mirella','mirta','moira','myrian','naiara','nair','nelida','nelina',
+  'nilda','noelia','noemí','noemi','nora','norma','ofelia','onelia','oralia','oriana',
+  'pamela','paola','patricia','paulina','perla','petra','piedad','priscila','prudencia',
+  'ramona','raquel','rebeca','regina','remedios','reina','romina','rosalba','rosalia',
+  'rosalinda','rosana','rosario','roxana','rufina','sabina','saira','sandra','sara','selva',
+  'serafina','silvana','silvia','simona','solange','soledad','sonia','susana','tamara',
+  'tatiana','teodora','teresa','thelma','trinidad','ursula','valentina','vanesa','vanina',
+  'veronica','vilma','violeta','virginia','viviana','wanda','ximena','xiomara','yamila',
+  'yanina','yesenia','yolanda','zulema','zunilda','bruna','lorenza','letizia','azzurra',
+  // nombres cortos comunes
+  'ai','li','yu','mei','lin','yan','xiu','fang','na','hua','lan','lian','qing','ying',
+  'xin','yun','jun','lei','rui','shu','wei','wen','xiao','ye','yi','zhen','zhi',
+]);
+
+const NOMBRES_M = new Set([
+  'juan','jose','carlos','luis','jorge','miguel','roberto','daniel','pablo','mario',
+  'pedro','alberto','sergio','fernando','alejandro','ricardo','antonio','marcelo','gustavo',
+  'francisco','raul','hernan','ariel','gabriel','adrian','nicolas','diego','alejandro',
+  'martin','facundo','ezequiel','matias','sebastián','sebastian','maximiliano','maximo',
+  'leandro','cristian','christian','andres','hector','ruben','oscar','hugo','ramon',
+  'nelson','victor','eduardo','ernesto','rodolfo','guillermo','walter','claudio','leonardo',
+  'david','marcos','angel','julian','emilio','cesar','felix','enrique','alfredo','manuel',
+  'ignacio','patricio','rodrigo','joaquin','santiago','agustin','lautaro','tomas','lucas',
+  'mateo','thiago','bautista','valentino','franco','enzo','nahuel','ivan','alan','bruno',
+  'elias','tobias','benjamin','simon','cristobal','augusto','mauro','lucas','federico',
+  'gonzalo','damian','mauricio','pablo','hernan','fabian','roberto','mario','carlos',
+  'gabriel','jorge','juan','jose','luis','pedro','miguel','antonio','ramon','oscar',
+  'victor','hugo','rafael','manuel','jorge','alberto','sergio','ricardo','gerardo',
+  'claudio','orlando','marcelo','walter','gustavo','raul','abel','aldo','bernardo',
+  'cesar','domingo','edgar','edmundo','edmundo','efrain','eladio','eloy','emilio',
+  'enzo','esteban','eugenio','ezequiel','fabio','facundo','fausto','federico','felipe',
+  'fermin','fidel','florencio','fortunato','franco','francisco','fredy','froilan',
+  'gaston','german','gilberto','gonzalo','gregorio','guillermo','gustavo','hernan',
+  'horacio','ignacio','isaias','isidro','ismael','ivan','javier','jeronimo','joaquin',
+  'jonatan','jorge','jose','juan','julian','leandro','leon','leonardo','lisandro',
+  'lucas','luis','manuel','marcelo','marcos','mario','martin','mateo','matias',
+  'mauricio','maximo','miguel','moises','nahuel','nelson','nicolas','norberto',
+  'octavio','omar','oscar','pablo','patricio','pedro','rafael','raul','renato',
+  'ricardo','roberto','rodolfo','rodrigo','rogelio','rolando','roman','ruben',
+  'santiago','sebastian','sergio','silvio','tomas','valentin','victor','walter',
+  'xavier','yamil','yonatan','zacarías','zacarias','abel','abelardo','abdon',
+  'abrahan','absalon','acacio','adalberto','adelino','adolfo','adriano','agapito',
+  'agustin','alan','albano','alberto','alcides','aldo','alejandro','alexis','alfredo',
+  'alicio','aliro','alonso','alvaro','amado','amancio','ambrosio','anacleto','ananias',
+  'andres','angel','aniceto','apolinar','aquiles','arcadio','archibaldo','ariel',
+  'aristides','armando','arnaldo','arnoldo','arón','arsenio','arturo','ascencio',
+  'augusto','aurelio','aureliano','axel','ayrton','baltazar','bartolome','basilio',
+  'bernabe','bernardo','blas','bonifacio','bradley','braian','brian','calixto',
+  'camilo','candido','carmelo','celestino','ciro','claudio','clemente','cornelio',
+  'cosme','cristian','cristiano','cristobal','dalmiro','damian','dario','david',
+  'demetrio','desiderio','diego','dionisio','domingo','donato','edgar','edmundo',
+  'edgardo','eduardo','efrain','eliseo','eloy','emiliano','emilio','enrique',
+  'eladio','erasmo','ernesto','esteban','estanislao','eulalio','eusebio','exequiel',
+  'ezequiel','fabricio','facundo','fausto','feliciano','felix','fermin','fernando',
+  'fidel','filemon','florencio','flavio','fortunato','franco','fredy','froilan',
+  'gabriel','gaston','gerardo','german','gilberto','gines','gonzalo','gregorio',
+  'heliodoro','heriberto','hermenegildo','hernan','hilario','hipolito','horacio',
+  'ignacio','ildefonso','illan','ireneo','isaias','isidoro','isidro','jacinto',
+  'javier','jeronimo','jorge','jose','josue','juan','julian','julio','justo',
+  'laureano','leandro','leon','leoncio','liborio','lisandro','lorenzo','lucas',
+  'macario','manuel','marcos','mariano','mario','martin','mateo','matias','mauricio',
+  'maximo','milciades','moises','napoleon','narciso','nemesio','nestor','nicanor',
+  'nicomedes','norberto','octavio','olegario','omar','onofre','oscar','oswaldo',
+  'ovidio','pablo','pancracio','patricio','paulino','pedro','plácido','primitivo',
+  'prudencio','rafael','raimundo','ramiro','ramon','raul','reinaldo','renato',
+  'rigoberto','roberto','rodrigo','rogelio','rolando','roman','romualdo','ronaldo',
+  'ruben','rufino','ruperto','salvador','samuel','saturnino','saul','secundino',
+  'sergio','silvano','silvio','simeon','sotero','timoteo','tito','tobias','tomas',
+  'ulises','urbano','valentín','valentin','valerio','venancio','victoriano','virgilio',
+  'vitorino','wenceslao','wilfredo','xavier','yeison','zahir',
+  // deportivos/modernos
+  'lautaro','thiago','enzo','bautista','messi','renzo','leonel','leonardо','nahuel',
+  'ciro','saul','axel','dylan','alan','brian','kevin','jonathan','ivan','alexis',
+]);
+
+let genderDetectTimeout = null;
+
+function detectGender(nombre) {
+  clearTimeout(genderDetectTimeout);
+  const hint = document.getElementById('gender-hint');
+  if(!nombre || nombre.trim().length < 2) { hint.style.display='none'; return; }
+
+  genderDetectTimeout = setTimeout(() => {
+    const primerNombre = nombre.trim().split(/[\s,]+/)[0].toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+    let sugerido = null;
+    if(NOMBRES_F.has(primerNombre)) sugerido = 'F';
+    else if(NOMBRES_M.has(primerNombre)) sugerido = 'M';
+
+    if(sugerido) {
+      const label = sugerido === 'F' ? '♀ Femenino' : '♂ Masculino';
+      const color = sugerido === 'F' ? '#8B3A8B' : '#1A3C5E';
+      const bg = sugerido === 'F' ? '#F9EEF9' : '#EEF5FF';
+      hint.style.display = 'flex';
+      hint.style.background = bg;
+      hint.style.border = `1px solid ${color}30`;
+      hint.style.color = color;
+      hint.innerHTML = `<span>🔍 Sugerido: <strong>${label}</strong></span>
+        <button onclick="acceptGender('${sugerido}')" style="padding:3px 10px;border:none;border-radius:6px;background:${color};color:#fff;font-size:11px;font-weight:700;cursor:pointer;">✓ Aceptar</button>
+        <button onclick="acceptGender('${sugerido==='F'?'M':'F'}')" style="padding:3px 10px;border:1.5px solid ${color};border-radius:6px;background:none;color:${color};font-size:11px;font-weight:600;cursor:pointer;">↔ Es ${sugerido==='F'?'♂ Masculino':'♀ Femenino'}</button>
+        <button onclick="document.getElementById('gender-hint').style.display='none'" style="padding:3px 8px;border:none;border-radius:6px;background:#ccc;color:#555;font-size:11px;cursor:pointer;">✕</button>`;
+    } else {
+      // Try API as fallback
+      hint.style.display = 'flex';
+      hint.style.background = '#F5F5F5';
+      hint.style.border = '1px solid #DDD';
+      hint.style.color = '#888';
+      hint.innerHTML = `<span>🔍 No se reconoció el nombre. Seleccioná manualmente el sexo.</span>`;
+      tryGenderAPI(primerNombre);
+    }
+  }, 400);
+}
+
+function acceptGender(g) {
+  document.getElementById('inp-sexo').value = g;
+  const hint = document.getElementById('gender-hint');
+  const label = g === 'F' ? '♀ Femenino' : '♂ Masculino';
+  hint.style.background = '#F0FBF5';
+  hint.style.border = '1px solid #B5E0CB';
+  hint.style.color = '#1E8B5A';
+  hint.innerHTML = `<span>✅ Sexo definido como <strong>${label}</strong></span>`;
+  setTimeout(() => hint.style.display='none', 2000);
+}
+
+function tryGenderAPI(nombre) {
+  fetch(`https://api.genderize.io/?name=${encodeURIComponent(nombre)}&country_id=AR`)
+    .then(r => r.json())
+    .then(data => {
+      if(data.gender && data.probability > 0.7) {
+        const g = data.gender === 'female' ? 'F' : 'M';
+        const label = g === 'F' ? '♀ Femenino' : '♂ Masculino';
+        const color = g === 'F' ? '#8B3A8B' : '#1A3C5E';
+        const bg = g === 'F' ? '#F9EEF9' : '#EEF5FF';
+        const hint = document.getElementById('gender-hint');
+        hint.style.background = bg;
+        hint.style.border = `1px solid ${color}30`;
+        hint.style.color = color;
+        hint.innerHTML = `<span>🔍 Sugerido (API): <strong>${label}</strong> <small style="opacity:.6">${Math.round(data.probability*100)}% confianza</small></span>
+          <button onclick="acceptGender('${g}')" style="padding:3px 10px;border:none;border-radius:6px;background:${color};color:#fff;font-size:11px;font-weight:700;cursor:pointer;">✓ Aceptar</button>
+          <button onclick="acceptGender('${g==='F'?'M':'F'}')" style="padding:3px 10px;border:1.5px solid ${color};border-radius:6px;background:none;color:${color};font-size:11px;font-weight:600;cursor:pointer;">↔ Es ${g==='F'?'♂ Masculino':'♀ Femenino'}</button>`;
+      }
+    }).catch(() => {}); // silent fail
+}
 
 // ========== CONTRATO ==========
 function onClienteChange() {
