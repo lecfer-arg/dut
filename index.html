@@ -151,7 +151,7 @@
     <div class="nav-tab active" onclick="switchTab('listado')">📋 Listado</div>
     <div class="nav-tab" onclick="switchTab('contrato')">📄 Contrato</div>
   </nav>
-  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v6</span></div>
+  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v7</span></div>
 </header>
 
 <!-- ===== SECCIÓN LISTADO ===== -->
@@ -462,9 +462,20 @@ function processFile(file) {
       } else parseExcel(e.target.result, file.name);
     };
     reader.readAsArrayBuffer(file);
+  } else if(ext === 'pdf') {
+    const reader = new FileReader();
+    reader.onload = e => {
+      if(typeof pdfjsLib === 'undefined') {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+        s.onload = () => { pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; parsePDF(e.target.result, file.name); };
+        document.head.appendChild(s);
+      } else parsePDF(e.target.result, file.name);
+    };
+    reader.readAsArrayBuffer(file);
   } else {
     document.getElementById('progressBar').classList.remove('show');
-    showAlert('fileAlert','error','⚠️ Los archivos PDF y Word no pueden procesarse en el navegador. Agregá los pasajeros manualmente o usá un Excel.');
+    showAlert('fileAlert','error','⚠️ Los archivos Word no pueden procesarse en el navegador. Usá un Excel o PDF con texto seleccionable.');
   }
 }
 
@@ -513,6 +524,113 @@ function parseExcel(buffer, filename) {
     showAlert('fileAlert','error','❌ Error al procesar el Excel. Agregá los pasajeros manualmente.');
     document.getElementById('progressBar').classList.remove('show');
   }
+}
+
+async function parsePDF(buffer, filename) {
+  try {
+    const pdf = await pdfjsLib.getDocument({data: buffer}).promise;
+    let fullText = '';
+    for(let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      // Reconstruct lines by grouping items with similar Y position
+      const items = content.items;
+      const lines = {};
+      items.forEach(item => {
+        const y = Math.round(item.transform[5]);
+        if(!lines[y]) lines[y] = [];
+        lines[y].push({x: item.transform[4], text: item.str});
+      });
+      // Sort lines top to bottom, items left to right
+      const sortedYs = Object.keys(lines).map(Number).sort((a,b) => b - a);
+      sortedYs.forEach(y => {
+        const lineItems = lines[y].sort((a,b) => a.x - b.x);
+        fullText += lineItems.map(i => i.text).join(' ') + '\n';
+      });
+    }
+
+    document.getElementById('progressBar').classList.remove('show');
+    const added = extractPassengersFromText(fullText, filename);
+    if(added > 0) {
+      showAlert('fileAlert','success',`✅ Se importaron ${added} pasajeros desde "${filename}".`);
+    } else {
+      showAlert('fileAlert','error','⚠️ No se encontraron pasajeros. El PDF puede ser una imagen escaneada o no tiene el formato esperado.');
+    }
+    renderTable();
+  } catch(e) {
+    document.getElementById('progressBar').classList.remove('show');
+    showAlert('fileAlert','error','❌ Error al leer el PDF: ' + e.message);
+  }
+}
+
+function extractPassengersFromText(text, filename) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+  let added = 0;
+  const today = new Date();
+
+  lines.forEach(line => {
+    // Match DNI patterns: 7-9 digits, possibly with dots
+    const dniMatch = line.match(/\b(\d{1,3}[\.]\d{3}[\.]\d{3}|\d{7,9})\b/g);
+    if(!dniMatch) return;
+
+    const dni = dniMatch[dniMatch.length - 1].replace(/\./g, '');
+    if(dni.length < 7 || dni.length > 9) return;
+    if(passengers.find(p => p.dni === dni)) return;
+
+    // Remove DNI and numbers/dates from line to get name
+    let namePart = line
+      .replace(/\b\d{1,3}[\.]\d{3}[\.]\d{3}\b/g, '')  // DNI con puntos
+      .replace(/\b\d{7,9}\b/g, '')                          // DNI sin puntos
+      .replace(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/g, '') // fechas
+      .replace(/\b\d+\b/g, '')                               // numeros sueltos
+      .replace(/[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ\s]/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+
+    if(namePart.length < 3) return;
+
+    // Split: try to detect if format is "APELLIDO Nombre" or "Nombre APELLIDO"
+    const words = namePart.split(/\s+/).filter(w => w.length > 1);
+    if(words.length < 2) return;
+
+    // Heuristic: uppercase words tend to be apellido
+    let apellido = '', nombre = '';
+    const upperWords = words.filter(w => w === w.toUpperCase() && w.length > 1);
+    const mixedWords = words.filter(w => w !== w.toUpperCase());
+
+    if(upperWords.length > 0 && mixedWords.length > 0) {
+      apellido = upperWords.join(' ');
+      nombre = mixedWords.join(' ');
+    } else {
+      // All same case: first word(s) as apellido, rest as nombre
+      apellido = words[0];
+      nombre = words.slice(1).join(' ');
+    }
+
+    apellido = apellido.toUpperCase().trim();
+    nombre = nombre.toUpperCase().trim();
+
+    if(!apellido || !nombre) return;
+
+    // Try to detect birth date for age
+    const fechaMatch = line.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/);
+    let menor = 0, butaca = 1;
+    if(fechaMatch) {
+      let y = parseInt(fechaMatch[3]);
+      if(y < 100) y += y < 30 ? 2000 : 1900;
+      const fnac = new Date(y, parseInt(fechaMatch[2])-1, parseInt(fechaMatch[1]));
+      if(!isNaN(fnac)) {
+        const age = Math.floor((today - fnac) / (365.25*24*3600*1000));
+        menor = age < 18 ? 1 : 0;
+        if(y >= 2018) butaca = 0;
+      }
+    }
+
+    const sexoAuto = detectGenderFromName(nombre);
+    passengers.push({apellido, nombre, tipo:'DNI', desc:'', dni, sexo:sexoAuto, menor, nac:'AR', tripulante:0, butaca});
+    added++;
+  });
+
+  return added;
 }
 
 function removeFile() {
