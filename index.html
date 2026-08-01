@@ -144,14 +144,13 @@
     <div style="font-size:26px;">🚌</div>
     <div>
       <h1>Lista de Pasajeros para Buses</h1>
-      <span>Micros de Gira SA</span>
     </div>
   </div>
   <nav class="nav-tabs">
     <div class="nav-tab active" onclick="switchTab('listado', this)">📋 Listado</div>
     <div class="nav-tab" onclick="switchTab('contrato', this)">📄 Contrato</div>
   </nav>
-  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v10</span></div>
+  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v12</span></div>
 </header>
 
 <!-- ===== SECCIÓN LISTADO ===== -->
@@ -660,6 +659,9 @@ function removeFile() {
   document.getElementById('fileSelected').classList.remove('show');
   document.getElementById('fileAlert').classList.remove('show');
   document.getElementById('progressBar').classList.remove('show');
+  // Clear passenger list
+  passengers = [];
+  renderTable();
 }
 
 function addPassenger() {
@@ -698,7 +700,7 @@ function renderTable() {
     const sexoLabel = p.sexo === 'F' ? '<span class="badge" style="background:#F9EEF9;color:#8B3A8B;">F</span>'
       : p.sexo === 'M' ? '<span class="badge" style="background:#EEF5FF;color:#1A3C5E;">M</span>'
       : '<span class="badge" style="background:#FFF3D6;color:#8B6000;">? —</span>';
-    const sexoEdit = `<select style="font-size:11px;padding:2px 4px;border-radius:5px;border:1px solid var(--border);margin-left:4px;" onchange="passengers[${i}].sexo=this.value;renderTable()">
+    const sexoEdit = `<select style="font-size:11px;padding:2px 4px;border-radius:5px;border:1px solid var(--border);margin-left:4px;" onchange="passengers[${i}].sexo=this.value;learnName(passengers[${i}].nombre,this.value);renderTable()">
       <option value="" ${!p.sexo?'selected':''}>—</option>
       <option value="F" ${p.sexo==='F'?'selected':''}>F</option>
       <option value="M" ${p.sexo==='M'?'selected':''}>M</option>
@@ -729,6 +731,8 @@ function showAlert(id,type,msg) {
 
 // Load XLSX
 const xs=document.createElement('script');xs.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';document.head.appendChild(xs);
+// Load saved clients into dropdown on startup
+setTimeout(loadSavedClientsToDropdown, 100);
 
 // ========== DETECCIÓN DE GÉNERO ==========
 const NOMBRES_F = new Set([
@@ -843,11 +847,40 @@ const NOMBRES_M = new Set([
 ]);
 
 
+// ========== LEARNED NAMES (localStorage) ==========
+const LEARNED_KEY = 'dut_gender_learned';
+
+function getLearnedNames() {
+  try { return JSON.parse(localStorage.getItem(LEARNED_KEY) || '{}'); }
+  catch(e) { return {}; }
+}
+
+function learnName(nombre, gender) {
+  if(!nombre || !gender) return;
+  const primer = nombre.trim().split(/[\s,\/]+/)[0].toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g,'');
+  if(primer.length < 2) return;
+  const learned = getLearnedNames();
+  learned[primer] = gender;
+  try { localStorage.setItem(LEARNED_KEY, JSON.stringify(learned)); } catch(e) {}
+}
+
+function detectGenderFromLearned(nombreCompleto) {
+  if(!nombreCompleto) return '';
+  const primer = nombreCompleto.trim().split(/[\s,\/]+/)[0].toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const learned = getLearnedNames();
+  return learned[primer] || '';
+}
+
 // Sync version for bulk import (no UI hints)
 function detectGenderFromName(nombreCompleto) {
   if(!nombreCompleto) return '';
   const primer = nombreCompleto.trim().split(/[\s,\/]+/)[0].toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  // Check learned names first (user corrections take priority)
+  const learned = getLearnedNames();
+  if(learned[primer]) return learned[primer];
   if(NOMBRES_F.has(primer)) return 'F';
   if(NOMBRES_M.has(primer)) return 'M';
   return '';
@@ -980,30 +1013,44 @@ function extractDUTData(text) {
 }
 
 function fillContractFromDUT(data) {
-  // Cliente - set to OTRO and fill manual
+  // Cliente - check if already in dropdown, else set manual
   const sel = document.getElementById('c-cliente');
-  sel.value = 'OTRO||';
   const manual = document.getElementById('c-cliente-manual');
-  manual.style.display = 'block';
-  if(data.cliente) manual.value = data.cliente;
-  if(data.cuit) document.getElementById('c-cuit').value = data.cuit;
-  if(data.direccion) document.getElementById('c-direccion').value = data.direccion;
+  let clienteFound = false;
+  if(data.cliente) {
+    for(let opt of sel.options) {
+      if(opt.text.toUpperCase() === data.cliente.toUpperCase()) {
+        sel.value = opt.value;
+        onClienteChange();
+        clienteFound = true;
+        break;
+      }
+    }
+  }
+  if(!clienteFound) {
+    sel.value = 'OTRO||';
+    manual.style.display = 'block';
+    if(data.cliente) manual.value = data.cliente;
+    if(data.cuit) document.getElementById('c-cuit').value = data.cuit;
+    if(data.direccion) document.getElementById('c-direccion').value = data.direccion;
+  }
 
-  // Unidad
+  // Unidad - auto-select from dominio
   if(data.dominio) {
-    document.getElementById('c-dominio').value = data.dominio;
-    // Try to match from select
     const uSel = document.getElementById('c-unidad');
     let found = false;
     for(let opt of uSel.options) {
-      if(opt.value.startsWith(data.dominio + '|')) {
+      if(opt.value.toUpperCase().startsWith(data.dominio.toUpperCase() + '|')) {
         uSel.value = opt.value;
         onUnidadChange();
         found = true;
         break;
       }
     }
-    if(!found) uSel.value = 'OTRO|';
+    if(!found) {
+      uSel.value = 'OTRO|';
+      document.getElementById('c-dominio').value = data.dominio;
+    }
   }
   if(data.butacas) document.getElementById('c-butacas').value = data.butacas;
 
@@ -1034,6 +1081,42 @@ function showDutAlert(type, msg) {
   el.className = `alert alert-${type} show`;
   el.textContent = msg;
   if(type === 'success') setTimeout(() => el.classList.remove('show'), 6000);
+}
+
+// ========== SAVED CLIENTS ==========
+const CLIENTS_KEY = 'dut_saved_clients';
+
+function getSavedClients() {
+  try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]'); }
+  catch(e) { return []; }
+}
+
+function saveNewClient(nombre, direccion, cuit) {
+  if(!nombre) return;
+  const clients = getSavedClients();
+  const exists = clients.find(c => c.nombre === nombre);
+  if(exists) return;
+  clients.push({nombre, direccion, cuit});
+  try { localStorage.setItem(CLIENTS_KEY, JSON.stringify(clients)); } catch(e) {}
+  addClientToDropdown(nombre, direccion, cuit);
+}
+
+function addClientToDropdown(nombre, direccion, cuit) {
+  const sel = document.getElementById('c-cliente');
+  // Check if already in dropdown
+  for(let opt of sel.options) {
+    if(opt.text === nombre) return;
+  }
+  const opt = document.createElement('option');
+  opt.value = `${nombre}|${direccion}|${cuit}`;
+  opt.text = nombre;
+  // Insert before "Otro"
+  const otroIdx = Array.from(sel.options).findIndex(o => o.value.startsWith('OTRO'));
+  sel.insertBefore(opt, sel.options[otroIdx]);
+}
+
+function loadSavedClientsToDropdown() {
+  getSavedClients().forEach(c => addClientToDropdown(c.nombre, c.direccion, c.cuit));
 }
 
 function onClienteChange() {
@@ -1121,6 +1204,18 @@ function getContratoData() {
   };
 }
 
+function saveClientIfNew() {
+  const sel = document.getElementById('c-cliente');
+  if(sel.value.startsWith('OTRO') || !sel.value) {
+    const nombre = document.getElementById('c-cliente-manual').value.trim().toUpperCase();
+    const direccion = document.getElementById('c-direccion').value.trim();
+    const cuit = document.getElementById('c-cuit').value.trim();
+    if(nombre && (direccion || cuit)) {
+      saveNewClient(nombre, direccion, cuit);
+    }
+  }
+}
+
 function validateContrato() {
   const d = getContratoData();
   const missing = [];
@@ -1166,10 +1261,7 @@ function buildContratoHTML(d) {
 
   <p><strong>6-</strong> En el supuesto caso que el contratante no pueda realizar el viaje por cualquier motivo la empresa tomará como resarcimiento de todo tipo la seña entregada por el mismo. Si fuese la empresa quien no pudiera prestar el servicio, deberá comunicarlo con una semana de anticipación y devolverá la suma señalada.</p>
 
-  <p><strong>7-</strong> Se establece de común acuerdo entre las partes el precio total del servicio en la suma de pesos $ ___________</p>
-  <p><strong>8-</strong> Pagaderos de la siguiente forma: Seña $ ___________ &nbsp;&nbsp; Saldo $ ___________</p>
-  <p><strong>9-</strong> Quedando el costo de viáticos a cargo del contratante (alojamiento, desayuno, almuerzo y cena)</p>
-  <p><strong>10-</strong> De conformidad se firman dos ejemplares del mismo tenor.</p>
+  <p><strong>7-</strong> Quedando el costo de viáticos a cargo del contratante (alojamiento, desayuno, almuerzo y cena). De conformidad se firman dos ejemplares del mismo tenor.</p>
 
   <div style="display:flex; justify-content:space-between; margin-top:50px;">
     <div style="text-align:center; width:220px;">
@@ -1191,6 +1283,7 @@ function buildContratoHTML(d) {
 }
 
 function previewContrato() {
+  saveClientIfNew();
   const missing = validateContrato();
   if(missing.length) { showAlert('contratoAlert','error','⚠️ Faltan: ' + missing.join(', ')); return; }
   const d = getContratoData();
@@ -1200,6 +1293,7 @@ function previewContrato() {
 }
 
 function printContrato() {
+  saveClientIfNew();
   const missing = validateContrato();
   if(missing.length) { showAlert('contratoAlert','error','⚠️ Faltan: ' + missing.join(', ')); return; }
   const d = getContratoData();
