@@ -148,10 +148,10 @@
     </div>
   </div>
   <nav class="nav-tabs">
-    <div class="nav-tab active" onclick="switchTab('listado')">📋 Listado</div>
-    <div class="nav-tab" onclick="switchTab('contrato')">📄 Contrato</div>
+    <div class="nav-tab active" onclick="switchTab('listado', this)">📋 Listado</div>
+    <div class="nav-tab" onclick="switchTab('contrato', this)">📄 Contrato</div>
   </nav>
-  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v9</span></div>
+  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v10</span></div>
 </header>
 
 <!-- ===== SECCIÓN LISTADO ===== -->
@@ -283,12 +283,12 @@
       <div style="font-size:13px;font-weight:700;color:var(--primary);margin-bottom:10px;">
         Opción 1: Cargar DUT (PDF de la CNRT)
       </div>
-      <div class="upload-zone" id="dutZone" onclick="document.getElementById('dutInput').click()" style="padding:20px;">
+      <div class="upload-zone" id="dutZone" onclick="document.getElementById('dutInput').click()" ondragover="event.preventDefault();this.classList.add('dragging')" ondragleave="this.classList.remove('dragging')" ondrop="event.preventDefault();this.classList.remove('dragging');if(event.dataTransfer.files[0])processDUT(event.dataTransfer.files[0])" style="padding:20px;">
         <div style="font-size:26px;margin-bottom:6px;">📋</div>
         <p><strong>Hacé clic o arrastrá el PDF del DUT aquí</strong></p>
         <p style="font-size:12px;">Los datos se completarán automáticamente</p>
       </div>
-      <input type="file" id="dutInput" accept=".pdf" style="display:none">
+      <input type="file" id="dutInput" accept=".pdf" style="display:none" onchange="if(this.files[0])processDUT(this.files[0])">
       <div id="dutAlert" class="alert" style="margin-top:8px;"></div>
       <div id="dutProgress" class="progress-bar"><div class="progress-inner"></div></div>
     </div>
@@ -438,11 +438,11 @@
 
 <script>
 // ========== TAB SWITCHING ==========
-function switchTab(tab) {
+function switchTab(tab, el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('sec-' + tab).classList.add('active');
-  event.target.classList.add('active');
+  if(el) el.classList.add('active');
 }
 
 // ========== LISTADO ==========
@@ -856,15 +856,7 @@ function detectGenderFromName(nombreCompleto) {
 
 // ========== CONTRATO ==========
 // ========== DUT PDF READER ==========
-document.addEventListener('DOMContentLoaded', () => {
-  const dutZone = document.getElementById('dutZone');
-  const dutInput = document.getElementById('dutInput');
-  if(!dutZone) return;
-  dutZone.addEventListener('dragover', e => { e.preventDefault(); dutZone.classList.add('dragging'); });
-  dutZone.addEventListener('dragleave', () => dutZone.classList.remove('dragging'));
-  dutZone.addEventListener('drop', e => { e.preventDefault(); dutZone.classList.remove('dragging'); if(e.dataTransfer.files[0]) processDUT(e.dataTransfer.files[0]); });
-  dutInput.addEventListener('change', function() { if(this.files[0]) processDUT(this.files[0]); });
-});
+// DUT events attached inline in HTML
 
 function processDUT(file) {
   if(!file.name.toLowerCase().endsWith('.pdf')) {
