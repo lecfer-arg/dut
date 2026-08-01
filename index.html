@@ -891,8 +891,7 @@ async function parseDUT(buffer) {
       });
       const sortedYs = Object.keys(lines).map(Number).sort((a,b) => b - a);
       sortedYs.forEach(y => {
-        text += lines[y].sort((a,b)=>a.x-b.x).map(i=>i.text).join(' ') + '
-';
+        text += lines[y].sort((a,b)=>a.x-b.x).map(i=>i.text).join(' ') + '\n';
       });
     }
 
@@ -907,8 +906,7 @@ async function parseDUT(buffer) {
 }
 
 function extractDUTData(text) {
-  const lines = text.split('
-').map(l => l.trim());
+  const lines = text.split('\n').map(l => l.trim());
   const data = {};
 
   lines.forEach((line, i) => {
