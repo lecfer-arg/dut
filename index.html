@@ -151,7 +151,7 @@
     <div class="nav-tab active" onclick="switchTab('listado')">📋 Listado</div>
     <div class="nav-tab" onclick="switchTab('contrato')">📄 Contrato</div>
   </nav>
-  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v7</span></div>
+  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v9</span></div>
 </header>
 
 <!-- ===== SECCIÓN LISTADO ===== -->
@@ -278,6 +278,27 @@
   <div class="card">
     <div class="card-title">📄 Datos del contrato</div>
 
+    <!-- DUT UPLOAD -->
+    <div style="margin-bottom:20px;">
+      <div style="font-size:13px;font-weight:700;color:var(--primary);margin-bottom:10px;">
+        Opción 1: Cargar DUT (PDF de la CNRT)
+      </div>
+      <div class="upload-zone" id="dutZone" onclick="document.getElementById('dutInput').click()" style="padding:20px;">
+        <div style="font-size:26px;margin-bottom:6px;">📋</div>
+        <p><strong>Hacé clic o arrastrá el PDF del DUT aquí</strong></p>
+        <p style="font-size:12px;">Los datos se completarán automáticamente</p>
+      </div>
+      <input type="file" id="dutInput" accept=".pdf" style="display:none">
+      <div id="dutAlert" class="alert" style="margin-top:8px;"></div>
+      <div id="dutProgress" class="progress-bar"><div class="progress-inner"></div></div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+      <hr style="flex:1;border:none;border-top:1px solid var(--border);">
+      <span style="font-size:12px;color:var(--muted);font-weight:600;">O COMPLETÁ MANUALMENTE</span>
+      <hr style="flex:1;border:none;border-top:1px solid var(--border);">
+    </div>
+
     <div class="info-box">
       💡 Completá los datos del viaje. Los campos con lista desplegable tienen opciones pre-cargadas pero podés escribir libremente si no encontrás la opción.
     </div>
@@ -294,6 +315,7 @@
           <option value="UNIVERSIDAD NACIONAL DE TUCUMAN|AYACUCHO 491, TUCUMAN|30-54667024-0">UNIVERSIDAD NACIONAL DE TUCUMAN</option>
           <option value="OTRO||">✏️ Otro (escribir abajo)</option>
         </select>
+        <input type="text" id="c-cliente-manual" placeholder="Escribí la razón social" style="display:none; margin-top:8px;">
       </div>
       <div class="form-group">
         <label>CUIT del cliente *</label>
@@ -833,9 +855,214 @@ function detectGenderFromName(nombreCompleto) {
 
 
 // ========== CONTRATO ==========
+// ========== DUT PDF READER ==========
+document.addEventListener('DOMContentLoaded', () => {
+  const dutZone = document.getElementById('dutZone');
+  const dutInput = document.getElementById('dutInput');
+  if(!dutZone) return;
+  dutZone.addEventListener('dragover', e => { e.preventDefault(); dutZone.classList.add('dragging'); });
+  dutZone.addEventListener('dragleave', () => dutZone.classList.remove('dragging'));
+  dutZone.addEventListener('drop', e => { e.preventDefault(); dutZone.classList.remove('dragging'); if(e.dataTransfer.files[0]) processDUT(e.dataTransfer.files[0]); });
+  dutInput.addEventListener('change', function() { if(this.files[0]) processDUT(this.files[0]); });
+});
+
+function processDUT(file) {
+  if(!file.name.toLowerCase().endsWith('.pdf')) {
+    showDutAlert('error','⚠️ Solo se aceptan archivos PDF.'); return;
+  }
+  document.getElementById('dutProgress').classList.add('show');
+  const reader = new FileReader();
+  reader.onload = e => {
+    if(typeof pdfjsLib === 'undefined') {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload = () => { pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; parseDUT(e.target.result); };
+      document.head.appendChild(s);
+    } else parseDUT(e.target.result);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function parseDUT(buffer) {
+  try {
+    const pdf = await pdfjsLib.getDocument({data: buffer}).promise;
+    let text = '';
+    // Read first 3 pages (cover + contratante + pasajeros header)
+    for(let i = 1; i <= Math.min(3, pdf.numPages); i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const lines = {};
+      content.items.forEach(item => {
+        const y = Math.round(item.transform[5]);
+        if(!lines[y]) lines[y] = [];
+        lines[y].push({x: item.transform[4], text: item.str});
+      });
+      const sortedYs = Object.keys(lines).map(Number).sort((a,b) => b - a);
+      sortedYs.forEach(y => {
+        text += lines[y].sort((a,b)=>a.x-b.x).map(i=>i.text).join(' ') + '
+';
+      });
+    }
+
+    document.getElementById('dutProgress').classList.remove('show');
+    const data = extractDUTData(text);
+    fillContractFromDUT(data);
+    showDutAlert('success', `✅ DUT cargado. Revisá los datos y completá lo que falte.`);
+  } catch(e) {
+    document.getElementById('dutProgress').classList.remove('show');
+    showDutAlert('error', '❌ Error al leer el DUT: ' + e.message);
+  }
+}
+
+function extractDUTData(text) {
+  const lines = text.split('
+').map(l => l.trim());
+  const data = {};
+
+  lines.forEach((line, i) => {
+    const l = line.toLowerCase();
+
+    // Dominio
+    const domMatch = line.match(/DOMINIO TITULAR[\s\S]*?([A-Z]{2}\d{3}[A-Z]{2}|[A-Z]{3}\d{3})/);
+    if(domMatch && !data.dominio) data.dominio = domMatch[1];
+
+    // Butacas
+    const butMatch = line.match(/Cantidad de asientos[:\s]+(\d+)/i);
+    if(butMatch) data.butacas = butMatch[1];
+
+    // Origen
+    if(l.includes('origen') && line.includes('TUCUMAN')) {
+      const m = line.match(/ARGENTINA,\s*[A-Z\s]+,\s*([A-Z\s]+DE\s+[A-Z]+|[A-Z\s]+)/);
+      if(m) data.origen = m[1].trim();
+      else data.origen = 'SAN MIGUEL DE TUCUMAN';
+    }
+
+    // Destino
+    if(l.includes('destino')) {
+      const m = line.match(/ARGENTINA,\s*[A-Z\s]+,\s*(.+)/);
+      if(m) data.destino = m[1].trim();
+    }
+
+    // Fechas: "Inicio: DD/MM/YYYY"
+    const inicioMatch = line.match(/Inicio[:\s]+(\d{2}\/\d{2}\/\d{4})/i);
+    if(inicioMatch) data.fsalida = inicioMatch[1];
+
+    const finMatch = line.match(/Fin[:\s]+(\d{2}\/\d{2}\/\d{4})/i);
+    if(finMatch) data.fregreso = finMatch[1];
+
+    // Contratante
+    if(l.includes('contratante')) {
+      const next = lines[i+1] || '';
+      if(next && !next.toLowerCase().includes('cuil') && !next.toLowerCase().includes('domicilio')) {
+        data.cliente = next.trim();
+      }
+      // Also try same line
+      const m = line.match(/Contratante[:\s]+(.+)/i);
+      if(m && m[1].trim().length > 2) data.cliente = m[1].trim();
+    }
+
+    // CUIL/CUIT
+    const cuitMatch = line.match(/CUIL\/CUIT[:\s]+([\d\-]+)/i);
+    if(cuitMatch) data.cuit = cuitMatch[1].trim();
+
+    // Domicilio
+    if(l.includes('domicilio') && (l.includes('buenos') || l.includes('tucuman') || l.includes('salta') || l.includes('cordob'))) {
+      const m = line.match(/Domicilio[:\s]+(.+)/i);
+      if(m) data.direccion = m[1].trim();
+    }
+
+    // Recorrido (programación turística)
+    if(l.includes('san miguel') && l.includes('viceversa')) {
+      data.recorrido = line.trim();
+    }
+    if(l.includes('san miguel') && l.includes('termas')) {
+      data.recorrido = data.recorrido || line.trim();
+    }
+  });
+
+  // Try to get dominio from pattern anywhere in text
+  if(!data.dominio) {
+    const m = text.match(/([A-Z]{2}\d{3}[A-Z]{2}|[A-Z]{3}\d{3})/g);
+    if(m) data.dominio = m[m.length-1];
+  }
+
+  return data;
+}
+
+function fillContractFromDUT(data) {
+  // Cliente - set to OTRO and fill manual
+  const sel = document.getElementById('c-cliente');
+  sel.value = 'OTRO||';
+  const manual = document.getElementById('c-cliente-manual');
+  manual.style.display = 'block';
+  if(data.cliente) manual.value = data.cliente;
+  if(data.cuit) document.getElementById('c-cuit').value = data.cuit;
+  if(data.direccion) document.getElementById('c-direccion').value = data.direccion;
+
+  // Unidad
+  if(data.dominio) {
+    document.getElementById('c-dominio').value = data.dominio;
+    // Try to match from select
+    const uSel = document.getElementById('c-unidad');
+    let found = false;
+    for(let opt of uSel.options) {
+      if(opt.value.startsWith(data.dominio + '|')) {
+        uSel.value = opt.value;
+        onUnidadChange();
+        found = true;
+        break;
+      }
+    }
+    if(!found) uSel.value = 'OTRO|';
+  }
+  if(data.butacas) document.getElementById('c-butacas').value = data.butacas;
+
+  // Origen / Destino
+  if(data.origen) document.getElementById('c-origen').value = data.origen;
+  if(data.destino) document.getElementById('c-destino').value = data.destino;
+  if(data.recorrido) document.getElementById('c-recorrido').value = data.recorrido;
+
+  // Fechas: convert DD/MM/YYYY to YYYY-MM-DD
+  if(data.fsalida) {
+    const [d,m,y] = data.fsalida.split('/');
+    document.getElementById('c-fsalida').value = `${y}-${m}-${d}`;
+  }
+  if(data.fregreso) {
+    const [d,m,y] = data.fregreso.split('/');
+    document.getElementById('c-fregreso').value = `${y}-${m}-${d}`;
+  }
+
+  // Lugar salida/regreso default
+  if(data.origen) {
+    document.getElementById('c-lsalida').value = data.origen;
+    document.getElementById('c-lregreso').value = data.origen;
+  }
+}
+
+function showDutAlert(type, msg) {
+  const el = document.getElementById('dutAlert');
+  el.className = `alert alert-${type} show`;
+  el.textContent = msg;
+  if(type === 'success') setTimeout(() => el.classList.remove('show'), 6000);
+}
+
 function onClienteChange() {
   const val = document.getElementById('c-cliente').value;
-  if(!val || val.startsWith('OTRO')) { document.getElementById('c-cuit').value=''; document.getElementById('c-direccion').value=''; return; }
+  const manualInput = document.getElementById('c-cliente-manual');
+  if(!val) {
+    manualInput.style.display = 'none';
+    document.getElementById('c-cuit').value = '';
+    document.getElementById('c-direccion').value = '';
+    return;
+  }
+  if(val.startsWith('OTRO')) {
+    manualInput.style.display = 'block';
+    manualInput.focus();
+    document.getElementById('c-cuit').value = '';
+    document.getElementById('c-direccion').value = '';
+    return;
+  }
+  manualInput.style.display = 'none';
   const parts = val.split('|');
   document.getElementById('c-direccion').value = parts[1] || '';
   document.getElementById('c-cuit').value = parts[2] || '';
@@ -887,8 +1114,9 @@ function getContratoData() {
   }
 
   return {
-    cliente: clienteSel.selectedIndex > 0 && !clienteSel.value.startsWith('OTRO')
-      ? clienteSel.options[clienteSel.selectedIndex].text : document.getElementById('c-direccion').value.split(',')[0],
+    cliente: clienteSel.value.startsWith('OTRO') || !clienteSel.value
+      ? document.getElementById('c-cliente-manual').value.trim().toUpperCase()
+      : clienteSel.options[clienteSel.selectedIndex].text,
     direccion: document.getElementById('c-direccion').value,
     cuit: document.getElementById('c-cuit').value,
     dominio: document.getElementById('c-dominio').value,
@@ -906,7 +1134,10 @@ function getContratoData() {
 function validateContrato() {
   const d = getContratoData();
   const missing = [];
-  if(!d.cliente) missing.push('Cliente');
+  const clienteSel = document.getElementById('c-cliente');
+  const esOtro = clienteSel.value.startsWith('OTRO') || !clienteSel.value;
+  if(esOtro && !document.getElementById('c-cliente-manual').value.trim()) missing.push('Cliente (razón social)');
+  else if(!esOtro && !clienteSel.value) missing.push('Cliente');
   if(!d.direccion) missing.push('Dirección');
   if(!d.cuit) missing.push('CUIT');
   if(!d.dominio) missing.push('Dominio');
