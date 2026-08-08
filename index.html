@@ -150,7 +150,7 @@
     <div class="nav-tab active" onclick="switchTab('listado', this)">📋 Listado</div>
     <div class="nav-tab" onclick="switchTab('contrato', this)">📄 Contrato</div>
   </nav>
-  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v18</span></div>
+  <div style="display:flex;align-items:center;padding:0 16px 0 8px;"><span style="color:rgba(255,255,255,0.3);font-size:11px;font-weight:500;letter-spacing:0.5px;">v22</span></div>
 </header>
 
 <!-- ===== SECCIÓN LISTADO ===== -->
@@ -506,46 +506,126 @@ function parseExcel(buffer, filename) {
     const ws = wb.Sheets[wb.SheetNames[0]];
     const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
     const today = new Date();
-    let added = 0, colAp=-1, colNom=-1, colDNI=-1, colFec=-1, hdr=-1;
-    for(let i=0; i<Math.min(data.length,10); i++) {
-      const row = data[i].map(c=>String(c).toLowerCase());
-      if(row.some(c=>c.includes('apellido')||c.includes('dni')||c.includes('nombre'))) {
-        hdr=i;
-        row.forEach((c,j) => {
-          if(c.includes('apellido')) colAp=j;
-          if((c.includes('nombre')&&!c.includes('apellido'))||c==='nombre') colNom=j;
-          if(c.includes('dni')||c.includes('documento')) colDNI=j;
-          if(c.includes('nac')||c.includes('fecha')) colFec=j;
+    let added = 0;
+
+    // --- Detect header row and column positions ---
+    let hdr = -1;
+    let colAp=-1, colNom=-1, colNomCompleto=-1, colDNI=-1, colFec=-1, colSexo=-1;
+
+    for(let i = 0; i < Math.min(data.length, 10); i++) {
+      const row = data[i].map(c => String(c).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim());
+      if(row.some(c => ['apellido','nombre','dni','documento','numero','razon','razon social'].includes(c) || c.includes('apellido') || c.includes('documento') || c.includes('numero'))) {
+        hdr = i;
+        row.forEach((c, j) => {
+          if(c === 'apellido' || c === 'apellidos') colAp = j;
+          else if(c === 'nombre' || c === 'nombres') colNom = j;
+          else if(c.includes('razon') || c === 'apellido y nombre' || c === 'nombre completo') colNomCompleto = j;
+          if(c === 'dni' || c === 'documento' || c === 'numero' || c === 'numero documento' || c.includes('n°') || c.includes('nro')) colDNI = j;
+          if(c.includes('nac') || c === 'fecha') colFec = j;
+          if(c === 'sexo' || c === 'genero' || c === 'género') colSexo = j;
         });
         break;
       }
     }
-    for(let i=(hdr>=0?hdr+1:0); i<data.length; i++) {
-      const row=data[i];
-      if(!row||row.every(c=>!c)) continue;
-      let ap='',nom='',dni='',menor=0;
-      if(colAp>=0&&colNom>=0) { ap=String(row[colAp]||'').trim().toUpperCase(); nom=String(row[colNom]||'').trim().toUpperCase(); }
-      else {
-        const tc=row.findIndex(c=>c&&isNaN(c)&&String(c).trim().length>2);
-        if(tc>=0){const pts=String(row[tc]).split(/[\s,\/]+/);ap=pts[0].toUpperCase();nom=pts.slice(1).join(' ').toUpperCase();}
+
+    const startRow = hdr >= 0 ? hdr + 1 : 0;
+
+    for(let i = startRow; i < data.length; i++) {
+      const row = data[i];
+      if(!row || row.every(c => !c)) continue;
+
+      let apellido = '', nombre = '', dni = '', sexo = '', menor = 0, butaca = 1;
+
+      // --- Name: prefer explicit apellido+nombre columns ---
+      if(colAp >= 0 && colNom >= 0) {
+        apellido = String(row[colAp] || '').trim().toUpperCase();
+        nombre   = String(row[colNom] || '').trim().toUpperCase();
+      } else if(colNomCompleto >= 0) {
+        const full = String(row[colNomCompleto] || '').trim().toUpperCase();
+        const words = full.split(/\s+/).filter(w => w.length > 0);
+        apellido = words[0] || '';
+        nombre   = words.slice(1).join(' ');
+      } else {
+        // Auto-detect: find first text column (skip numeric/empty)
+        for(let j = 0; j < row.length; j++) {
+          const val = String(row[j] || '').trim();
+          if(val && isNaN(val) && val.length > 1) {
+            const words = val.toUpperCase().split(/\s+/);
+            apellido = words[0];
+            nombre   = words.slice(1).join(' ');
+            break;
+          }
+        }
       }
-      if(colDNI>=0) dni=String(row[colDNI]||'').replace(/\D/g,'');
-      else { for(let j=0;j<row.length;j++){const v=String(row[j]).replace(/\D/g,'');if(v.length>=7&&v.length<=9){dni=v;break;}} }
-      if(colFec>=0&&row[colFec]){const fv=row[colFec];let fn=fv instanceof Date?fv:(typeof fv==='number'?new Date((fv-25569)*86400*1000):new Date(String(fv)));if(fn&&!isNaN(fn)){const age=Math.floor((today-fn)/(365.25*24*3600*1000));menor=age<18?1:0;}}
-      if(!ap||!dni||dni.length<6) continue;
-      if(passengers.find(p=>p.dni===dni)) continue;
-      const sexoAuto = detectGenderFromName(nom);
-      passengers.push({apellido:ap,nombre:nom,tipo:'DNI',desc:'',dni,sexo:sexoAuto,menor,nac:'AR',tripulante:0,butaca:1});
+
+      // --- DNI ---
+      if(colDNI >= 0) {
+        const val = row[colDNI];
+        if(val !== '') dni = String(typeof val === 'number' ? Math.round(val) : val).replace(/\D/g,'');
+      }
+      if(!dni) {
+        for(let j = 0; j < row.length; j++) {
+          const v = String(row[j]).replace(/\D/g,'');
+          if(v.length >= 7 && v.length <= 9) { dni = v; break; }
+        }
+      }
+
+      // --- Sexo ---
+      if(colSexo >= 0) {
+        const s = String(row[colSexo] || '').toLowerCase().trim();
+        if(s.startsWith('f') || s.includes('fem')) sexo = 'F';
+        else if(s.startsWith('m') || s.includes('masc')) sexo = 'M';
+      }
+
+      // --- Fecha nacimiento ---
+      if(colFec >= 0 && row[colFec]) {
+        const fv = row[colFec];
+        let fn = null;
+        if(fv instanceof Date) {
+          fn = fv;
+        } else if(typeof fv === 'number') {
+          // Excel serial date
+          fn = new Date((fv - 25569) * 86400 * 1000);
+        } else {
+          const s = String(fv).trim();
+          // Try DD/MM/YYYY (Argentine format)
+          const dmyMatch = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+          if(dmyMatch) {
+            let y = parseInt(dmyMatch[3]);
+            if(y < 100) y += y < 30 ? 2000 : 1900;
+            fn = new Date(y, parseInt(dmyMatch[2])-1, parseInt(dmyMatch[1]));
+          } else {
+            // Try ISO or other formats
+            fn = new Date(s);
+          }
+        }
+        if(fn && !isNaN(fn.getTime())) {
+          const age = Math.floor((today - fn) / (365.25*24*3600*1000));
+          menor = age < 18 ? 1 : 0;
+          if(fn.getFullYear() >= 2019) butaca = 0;
+        }
+      }
+
+      // --- Validate & add ---
+      if(!apellido || !dni || dni.length < 6) continue;
+      if(passengers.find(p => p.dni === dni)) continue;
+
+      // Detect gender from name if not in file
+      if(!sexo) sexo = detectGenderFromName(nombre || apellido);
+
+      passengers.push({apellido, nombre, tipo:'DNI', desc:'', dni, sexo, menor, nac:'AR', tripulante:0, butaca});
       added++;
     }
+
     document.getElementById('progressBar').classList.remove('show');
     showAlert('fileAlert','success',`✅ Se importaron ${added} pasajeros desde "${filename}".`);
     renderTable();
   } catch(e) {
-    showAlert('fileAlert','error','❌ Error al procesar el Excel. Agregá los pasajeros manualmente.');
+    showAlert('fileAlert','error','❌ Error al procesar el Excel: ' + e.message);
     document.getElementById('progressBar').classList.remove('show');
   }
 }
+
 
 async function parsePDF(buffer, filename) {
   try {
@@ -1292,19 +1372,16 @@ function printContrato() {
   const clienteName = (d.cliente || 'contrato').replace(/[^a-zA-Z0-9]/g,'_').substring(0,30);
   const fecha = (d.fsalida || '').replace(/\//g,'-');
 
-  const css = `
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    @page { size: A4; margin: 20mm 18mm; }
-    body { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.6; color: #000; background: #fff; }
-    h2 { text-align: center; font-size: 13px; font-weight: bold; margin-bottom: 14px; letter-spacing: 1px; }
-    p { text-align: justify; margin-bottom: 8px; }
-    .firma-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 40px; }
-    .firma-left { text-align: center; width: 220px; }
-    .firma-left img { width: 160px; display: block; margin: 0 auto; }
-    .firma-left .cuit { font-size: 11px; margin-top: 2px; }
-    .firma-right { text-align: center; width: 220px; }
-    .firma-right .linea { border-top: 1px solid #000; margin-top: 70px; padding-top: 6px; font-size: 11px; line-height: 1.5; }
-  `;
+  const css = '* { box-sizing: border-box; margin: 0; padding: 0; }' +
+    '@page { size: A4; margin: 20mm 18mm; }' +
+    'body { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.6; color: #000; background: #fff; }' +
+    'h2 { text-align: center; font-size: 13px; font-weight: bold; margin-bottom: 14px; letter-spacing: 1px; }' +
+    'p { text-align: justify; margin-bottom: 8px; }' +
+    '.firma-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 40px; }' +
+    '.firma-left { text-align: center; width: 220px; }' +
+    '.firma-left img { width: 160px; display: block; margin: 0 auto; }' +
+    '.firma-right { text-align: center; width: 220px; }' +
+    '.firma-right .linea { border-top: 1px solid #000; margin-top: 70px; padding-top: 6px; font-size: 11px; line-height: 1.5; }';
 
   const fullHTML = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Contrato</title><style>' + css + '</style></head><body>' + html + '</body></html>';
 
